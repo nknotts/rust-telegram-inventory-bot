@@ -42,11 +42,54 @@ struct InventoryState {
     matches: Vec<Match>,
 }
 
-async fn update_state(states: &mut Vec<InventoryState>) -> Result<bool, reqwest::Error> {
+enum MatchUpdate {
+    NoChange,
+    Updated(Vec<InventoryState>),
+}
+
+#[derive(Debug)]
+enum Error {
+    IO(std::io::Error),
+    SerdeYaml(serde_yaml::Error),
+    Reqwest(reqwest::Error),
+}
+
+type Result<T> = std::result::Result<T, Error>;
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Error {
+        Error::IO(err)
+    }
+}
+
+impl From<serde_yaml::Error> for Error {
+    fn from(err: serde_yaml::Error) -> Error {
+        Error::SerdeYaml(err)
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Error {
+        Error::Reqwest(err)
+    }
+}
+
+async fn update_state(fname: &str) -> Result<MatchUpdate> {
     log::debug!("Start Update State");
+
+    let yaml_str = std::fs::read_to_string(fname.clone())?;
+    let mut states: Vec<InventoryState> = serde_yaml::from_str(&yaml_str)?;
+
     let mut state_changed = false;
     for state in states.iter_mut() {
-        let body = reqwest::get(state.url.clone()).await?.text().await?;
+        let body = reqwest::Client::builder()
+            .user_agent("curl/7.79.1")
+            .build()?
+            .get(state.url.clone())
+            .send()
+            .await?
+            .text()
+            .await?;
 
         let in_stock = state.matches.iter().all(|text_match| match text_match {
             Match::Regex(val) => val.is_match(&body),
@@ -59,27 +102,28 @@ async fn update_state(states: &mut Vec<InventoryState>) -> Result<bool, reqwest:
             state_changed = true;
         }
     }
-    log::debug!("Finished Update State");
-    return Ok(state_changed);
-}
 
-fn update_yml(fname: String, states: &Vec<InventoryState>) {
-    let yaml_str = serde_yaml::to_string(&states).unwrap();
-    std::fs::write(fname, yaml_str).unwrap();
+    if state_changed {
+        let yaml_str = serde_yaml::to_string(&states)?;
+        std::fs::write(fname.to_string(), yaml_str)?;
+        Ok(MatchUpdate::Updated(states))
+    } else {
+        Ok(MatchUpdate::NoChange)
+    }
 }
 
 async fn send_inventory_state(
     header: &str,
     bot: &DefaultParseMode<AutoSend<Bot>>,
     chat_id: ChatId,
-    states: &Vec<InventoryState>,
+    states: Vec<InventoryState>,
 ) {
     let mut data: String;
     data = header.to_string();
     for state in states.iter() {
         write!(
             data,
-            "\n{} \\- [{}]({}) \\- {}",
+            "\n{} - [{}]({}) - {}",
             state.product,
             state.vendor,
             state.url,
@@ -90,6 +134,7 @@ async fn send_inventory_state(
         )
         .unwrap();
     }
+    data = data.replace("-", "\\-");
 
     log::info!("Sending: {}", data);
     match bot.send_message(chat_id, data).await {
@@ -118,34 +163,35 @@ async fn main() {
         })
         .init();
 
-    let yaml_str = std::fs::read_to_string(cli_args.match_file.clone()).unwrap();
-    let mut inventory_state: Vec<InventoryState> = serde_yaml::from_str(&yaml_str).unwrap();
-
     let bot = Bot::from_env()
         .auto_send()
         .parse_mode(ParseMode::MarkdownV2);
     let chat_id = ChatId(cli_args.chat_id);
 
-    send_inventory_state("Boot", &bot, chat_id.clone(), &inventory_state).await;
+    {
+        let yaml_str = std::fs::read_to_string(cli_args.match_file.clone()).unwrap();
+        let inventory_state: Vec<InventoryState> = serde_yaml::from_str(&yaml_str).unwrap();
+        send_inventory_state("Boot", &bot, chat_id.clone(), inventory_state).await;
+    }
 
     let forever = task::spawn(async move {
         let mut interval = time::interval(Duration::from_secs_f64(cli_args.update_period_s));
 
         loop {
             interval.tick().await;
-            match update_state(&mut inventory_state).await {
-                Ok(changed) => {
-                    if changed {
-                        update_yml(cli_args.match_file.clone(), &inventory_state);
+            match update_state(&cli_args.match_file).await {
+                Ok(update) => match update {
+                    MatchUpdate::NoChange => log::debug!("State did not change"),
+                    MatchUpdate::Updated(inventory_state) => {
                         send_inventory_state(
                             "State Changed",
                             &bot,
                             chat_id.clone(),
-                            &inventory_state,
+                            inventory_state,
                         )
-                        .await;
+                        .await
                     }
-                }
+                },
                 Err(err) => log::error!("Failed to update state: {:?}", err),
             }
         }
