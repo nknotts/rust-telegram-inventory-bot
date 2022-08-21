@@ -1,0 +1,16 @@
+{
+    "actionButtons": {
+        "defaultColor": "#white", // Can also use string color names.
+        "loadNpmCommands": false, // Disables automatic generation of actions for npm commands.
+        "commands": [
+            {
+                "name": "Build Cargo",
+                "command": "cargo build",
+            },
+            {
+                "name": "Run Cargo",
+                "command": "cargo run",
+            }
+        ]
+    }
+}
