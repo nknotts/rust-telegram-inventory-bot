@@ -35,11 +35,11 @@ enum Match {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct InventoryState {
-    vendor: String,
     product: String,
+    vendor: String,
     url: String,
-    matches: Vec<Match>,
     in_stock: bool,
+    matches: Vec<Match>,
 }
 
 async fn update_state(states: &mut Vec<InventoryState>) -> Result<bool, reqwest::Error> {
