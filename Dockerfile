@@ -1,6 +1,6 @@
 FROM rust:buster
 ADD src  /work/src
-ADD Cargo.* /work
+ADD Cargo.* /work/
 RUN cd /work; cargo build
 
 FROM rust:buster
