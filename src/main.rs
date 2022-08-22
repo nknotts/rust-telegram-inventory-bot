@@ -1,12 +1,10 @@
+use clap::Parser;
 use log;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Write, io::Write as IoWrite, time::Duration};
-use tokio::{task, time};
-
-use clap::Parser;
-
 use teloxide::{adaptors::DefaultParseMode, prelude::*, types::ParseMode};
+use tokio::{task, time};
 
 #[derive(Parser)]
 #[clap(about = "Inventory Alerts", long_about = None, version, about)]
@@ -29,6 +27,8 @@ struct Cli {
 enum Match {
     #[serde(with = "serde_regex")]
     Regex(Regex),
+    #[serde(with = "serde_regex")]
+    NotRegex(Regex),
     Contains(String),
     DoesNotContain(String),
 }
@@ -93,6 +93,7 @@ async fn update_state(fname: &str) -> Result<MatchUpdate> {
 
         let in_stock = state.matches.iter().all(|text_match| match text_match {
             Match::Regex(val) => val.is_match(&body),
+            Match::NotRegex(val) => !val.is_match(&body),
             Match::Contains(val) => body.contains(val),
             Match::DoesNotContain(val) => !body.contains(val),
         });
