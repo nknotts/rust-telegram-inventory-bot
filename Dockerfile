@@ -6,4 +6,6 @@ RUN cd /work; cargo build
 FROM rust:buster
 WORKDIR /inventory/
 COPY --from=0 /work/target/debug/inventory-bot /inventory/inventory-bot
-CMD exec ./inventory-bot -u 60 $TELEGRAM_CHAT_ID 
+ENV LOG_LEVEL=info
+ENV UPDATE_PERIOD_S=60
+CMD ./inventory-bot -u $UPDATE_PERIOD_S -l $LOG_LEVEL $TELEGRAM_CHAT_ID 
